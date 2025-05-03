@@ -1,0 +1,22 @@
+const int waterSensorPin = 23;
+unsigned long lastCheck = 0;
+const unsigned long checkInterval = 1000;  // 1 second
+
+void setup() {
+  pinMode(waterSensorPin, INPUT);
+  Serial.begin(9600);
+}
+
+void loop() {
+  unsigned long currentTime = millis();
+
+  if (currentTime - lastCheck >= checkInterval) {
+    lastCheck = currentTime;
+
+    if (digitalRead(waterSensorPin) == HIGH) {
+      Serial.println("Water detected!");
+    }
+  }
+
+  // Do other stuff here if needed
+}
