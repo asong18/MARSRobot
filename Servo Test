@@ -1,0 +1,22 @@
+#include <Servo.h>
+
+Servo myServo;
+
+int pos = 0;         // current position
+int direction = 1;   // 1 = right, -1 = left
+
+void setup() {
+  myServo.attach(25);  // attach to pin 25
+}
+
+void loop() {
+  myServo.write(pos);  // move to position
+  delay(125);           // slower sweep (increase for slower speed)
+
+  pos += direction;
+
+  // Reverse direction at limits
+  if (pos >= 180 || pos <= 0) {
+    direction = -direction;
+  }
+}
