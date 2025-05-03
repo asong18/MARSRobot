@@ -1,0 +1,197 @@
+#include <Servo.h>
+#include <Stepper.h>
+
+// ================= ESC (Thruster) Control =================
+const byte servoPin = 10;
+Servo servo;
+bool escMode = false;
+
+// ================= Stepper Setup =================
+#define STEPS 100  // steps per revolution
+
+// ====== Limit Switch Pins (for Top & Bottom Only) ======
+const int topMiddlePin = 26;
+const int topOutsidePin = 24;
+const int bottomMiddlePin = 28;
+const int bottomOutsidePin = 29;
+
+// ====== Stepper Motor Pins (IN1, IN2, IN3, IN4) ======
+Stepper topStepper(STEPS, 38, 40, 42, 44);
+Stepper bottomStepper(STEPS, 46, 47,48,49);
+Stepper movingMassStepper(STEPS, 30, 32, 34, 36);
+
+// ====== Enum and States ======
+enum Direction { FORWARD, BACKWARD };
+
+Direction topDirection = FORWARD;
+Direction bottomDirection = FORWARD;
+Direction movingMassDirection = FORWARD;
+
+bool topMoving = false;
+bool bottomMoving = false;
+bool movingMassActive = false;
+unsigned long movingMassStartTime = 0;
+
+void setup() {
+  Serial.begin(9600);
+
+  // ESC Initialization
+  servo.attach(servoPin);
+  servo.writeMicroseconds(1500);  // Stop signal
+  delay(7000);  // Wait for ESC to arm
+
+  // Stepper Speeds
+  topStepper.setSpeed(100);
+  bottomStepper.setSpeed(50);
+  movingMassStepper.setSpeed(50);
+
+  // Limit Switch Inputs (top & bottom only)
+  pinMode(topMiddlePin, INPUT_PULLUP);
+  pinMode(topOutsidePin, INPUT_PULLUP);
+  pinMode(bottomMiddlePin, INPUT_PULLUP);
+  pinMode(bottomOutsidePin, INPUT_PULLUP);
+
+  // Command Prompt
+  Serial.println("Commands:");
+  Serial.println("  'e' - Enter ESC mode (PWM control)");
+  Serial.println("  't' - Move TOP stepper");
+  Serial.println("  'b' - Move BOTTOM stepper");
+  Serial.println("  'm' - Move MOVING MASS stepper (15s, alternating direction)");
+}
+
+void loop() {
+  if (Serial.available() > 0) {
+    if (escMode) {
+      int pwm = Serial.parseInt();
+      if (pwm >= 1100 && pwm <= 1900) {
+        Serial.print("Running thruster at PWM = ");
+        Serial.println(pwm);
+        servo.writeMicroseconds(pwm);
+        delay(5000);  // Run for 5 seconds
+        servo.writeMicroseconds(1500);  // Stop
+        Serial.println("Thruster stopped after 5 seconds.");
+      } else {
+        Serial.println("Invalid PWM. Use 1100 to 1900.");
+      }
+      escMode = false;
+    } else {
+      char command = Serial.read();
+      if (command == '\n' || command == '\r') return;
+
+      switch (command) {
+        case 'e':
+          escMode = true;
+          Serial.println("Enter PWM value (1100-1900):");
+          break;
+        case 't':
+          topMoving = true;
+          Serial.println("Moving TOP stepper...");
+          break;
+        case 'b':
+          bottomMoving = true;
+          Serial.println("Moving BOTTOM stepper...");
+          break;
+        case 'm':
+          if (!movingMassActive) {
+            movingMassActive = true;
+            movingMassStartTime = millis();
+            Serial.print("Moving MOVING MASS ");
+            Serial.println(movingMassDirection == FORWARD ? "FORWARD" : "BACKWARD");
+          }
+          break;
+        default:
+          Serial.print("Unknown command: ");
+          Serial.println(command);
+          Serial.println("Use 'e', 't', 'b', or 'm'.");
+          break;
+      }
+    }
+    
+  }
+
+  handleTopStepper();
+  handleBottomStepper();
+  handleMovingMass();
+}
+
+// ====== Top Stepper Logic ======
+void handleTopStepper() {
+  if (topMoving) {
+    int direction = (topDirection == FORWARD) ? -STEPS : STEPS;
+    topStepper.step(direction); // The sign can be changed based on what you see from the stepper
+    /*
+      If the stepper is going outwards, hits the limit switch and continues to spin, but when you manually
+      press the middle limit switch and it stops, change direction
+    */
+    if ((topDirection == FORWARD && digitalRead(topMiddlePin) == LOW) ||
+        (topDirection == BACKWARD && digitalRead(topOutsidePin) == LOW)) {
+      topDirection = (topDirection == FORWARD) ? BACKWARD : FORWARD;
+      topMoving = false;
+      disableTopStepper();
+      Serial.println("Top limit reached. Reversing.");
+    }
+  }
+}
+
+// ====== Bottom Stepper Logic ======
+void handleBottomStepper() {
+  if (bottomMoving) {
+    int direction = (bottomDirection == FORWARD) ? -STEPS : STEPS;
+    bottomStepper.step(-direction); // The sign can be changed based on what you see from the stepper
+    /*
+      If the stepper is going outwards, hits the limit switch and continues to spin, but when you manually
+      press the middle limit switch and it stops, change direction
+    */
+
+    if ((bottomDirection == FORWARD && digitalRead(bottomMiddlePin) == LOW) ||
+        (bottomDirection == BACKWARD && digitalRead(bottomOutsidePin) == LOW)) {
+      bottomDirection = (bottomDirection == FORWARD) ? BACKWARD : FORWARD;
+      bottomMoving = false;
+      disableBottomStepper();
+      Serial.println("Bottom limit reached. Reversing.");
+    }
+  }
+}
+
+
+/*
+  I wouldn't change anything below this, just twist the stepper to the far end, and then run it
+*/
+// ====== Moving Mass Stepper (20s, toggled by 'm') ======
+void handleMovingMass() {
+  if (movingMassActive) {
+    if (millis() - movingMassStartTime < 20000) { // TIMED TO MOVE FOR 20 SECONDS
+      int stepDir = (movingMassDirection == FORWARD) ? 1 : -1;
+      movingMassStepper.step(-stepDir); 
+    } else {
+      movingMassActive = false;
+      disableMovingMassStepper();
+      movingMassDirection = (movingMassDirection == FORWARD) ? BACKWARD : FORWARD;
+      Serial.println("Moving Mass done. Awaiting next 'm' command.");
+    }
+  }
+}
+
+
+// DO NOT CHANGE ANYTHING UNDER HERE
+// ====== Disable Stepper Coils ======
+void disableTopStepper() {
+  digitalWrite(38, LOW);
+  digitalWrite(40, LOW);
+  digitalWrite(42, LOW);
+  digitalWrite(44, LOW);
+}
+
+void disableBottomStepper() {
+  digitalWrite(46, LOW);
+  digitalWrite(48, LOW);
+  digitalWrite(50, LOW);
+  digitalWrite(52, LOW);
+}
+
+void disableMovingMassStepper() {
+  digitalWrite(30, LOW);
+  digitalWrite(32, LOW);
+  digitalWrite(34, LOW);
+  digitalWrite(36, LOW);
+}
